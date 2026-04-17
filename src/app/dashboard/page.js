@@ -1,24 +1,17 @@
-'use client';
-
 import { useState, useRef, useEffect, useCallback } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
 
 // ── SUPABASE ──────────────────────────────────────────────────────────────────
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  'https://gstkzsazcwxihhrhtkjn.supabase.co',
-  'sb_publishable_hYfjkP-E9vU0waQbY4_oGA_45_nUiMU'
-);
+const SB_URL = "https://gstkzsazcwxihhrhtkjn.supabase.co";
+const SB_KEY = "sb_publishable_hYfjkP-E9vU0waQbY4_oGA_45_nUiMU";
 
 async function sbFetch(path, options = {}) {
-  const url = new URL(`https://gstkzsazcwxihhrhtkjn.supabase.co/rest/v1${path}`);
-  const res = await fetch(url.toString(), {
+  const res = await fetch(`${SB_URL}/rest/v1${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      "apikey": 'sb_publishable_hYfjkP-E9vU0waQbY4_oGA_45_nUiMU',
-      "Authorization": `Bearer sb_publishable_hYfjkP-E9vU0waQbY4_oGA_45_nUiMU`,
+      "apikey": SB_KEY,
+      "Authorization": `Bearer ${SB_KEY}`,
       ...options.headers,
     },
   });
@@ -161,7 +154,7 @@ function UploadCSVButton({ onUpload, uploading }) {
   return (
     <input
       type="file"
-      accept=".csv"
+      accept=".xlsx,.xls,.csv"
       disabled={uploading}
       onChange={onUpload}
       title="อัพโหลด CSV"
@@ -194,20 +187,44 @@ function useCSVUpload(onSuccess) {
   const [uploadResult, setUploadResult] = useState(null);
   const [preview, setPreview] = useState(null);
 
+  async function loadXLSX() {
+    if (window.XLSX) return window.XLSX;
+    return new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+      s.onload = () => resolve(window.XLSX);
+      s.onerror = () => reject(new Error("โหลด XLSX ไม่ได้"));
+      document.head.appendChild(s);
+    });
+  }
+
   async function handleUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
     setUploadResult(null); setPreview(null);
     try {
-      const text = await new Promise((res, rej) => {
-        const reader = new FileReader();
-        reader.onload = ev => res(ev.target.result);
-        reader.onerror = () => rej(new Error("อ่านไฟล์ไม่ได้"));
-        reader.readAsText(file, "utf-8");
-      });
-      const rawRows = parseCSV(text);
-      const mapped = rawRows.map(mapCSVRow).filter(r => r["เลขออเดอร์"]);
-      if (!mapped.length) { setUploadResult({ error:"ไม่พบข้อมูล — ตรวจสอบรูปแบบ CSV" }); return; }
+      const isExcel = file.name.endsWith(".xlsx") || file.name.endsWith(".xls");
+      let mapped = [];
+
+      if (isExcel) {
+        const XL = await loadXLSX();
+        const buffer = await file.arrayBuffer();
+        const wb = XL.read(buffer, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rawRows = XL.utils.sheet_to_json(ws, { defval: "" });
+        mapped = rawRows.map(mapCSVRow).filter(r => r["เลขออเดอร์"]);
+      } else {
+        const text = await new Promise((res, rej) => {
+          const reader = new FileReader();
+          reader.onload = ev => res(ev.target.result);
+          reader.onerror = () => rej(new Error("อ่านไฟล์ไม่ได้"));
+          reader.readAsText(file, "utf-8");
+        });
+        const rawRows = parseCSV(text);
+        mapped = rawRows.map(mapCSVRow).filter(r => r["เลขออเดอร์"]);
+      }
+
+      if (!mapped.length) { setUploadResult({ error:"ไม่พบข้อมูล — ตรวจสอบรูปแบบไฟล์" }); return; }
       setPreview({ rows: mapped, filename: file.name });
     } catch (err) { setUploadResult({ error: err.message }); }
     e.target.value = "";
